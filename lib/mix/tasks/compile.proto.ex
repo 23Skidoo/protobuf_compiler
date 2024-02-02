@@ -2,6 +2,8 @@ defmodule Mix.Tasks.Compile.Proto do
   @moduledoc """
   Compiles `.proto` files into `.pb.ex`.
 
+  Modified version of https://github.com/OffgridElectric/protobuf_compiler/
+
   ## Usage
 
   This compiler can be added to the list of compilers for a project:
@@ -88,8 +90,6 @@ defmodule Mix.Tasks.Compile.Proto do
   @doc false
   @impl true
   def run(_args) do
-    Application.ensure_loaded(:protobuf_compiler)
-
     %State{opts: get_options(), manifest: parse_manifest(manifest())}
     |> set_force()
     |> check_exec("protoc")
@@ -200,7 +200,7 @@ defmodule Mix.Tasks.Compile.Proto do
     args = do_protoc_args(s, sources, tmpdir)
     cmd = "protoc " <> Enum.join(args, " ")
 
-    if Mix.shell().cmd(cmd, env: s.env) == 0 do
+    if Mix.shell().cmd(cmd) == 0 do
       targets =
         tmpdir
         |> Path.join("**/*.pb.ex")
@@ -232,14 +232,14 @@ defmodule Mix.Tasks.Compile.Proto do
           Enum.join(out_opts, ",") <> ":" <> tmpdir
       end
 
-    includes =
-      sources
-      |> Enum.reduce(MapSet.new(), &MapSet.put(&2, Path.dirname(&1)))
-      |> MapSet.to_list()
-      |> Kernel.++(s.opts.includes)
+    # includes =
+    #   sources
+    #   |> Enum.reduce(MapSet.new(), &MapSet.put(&2, Path.dirname(&1)))
+    #   |> MapSet.to_list()
+    #   |> Kernel.++(s.opts.includes)
 
     []
-    |> Kernel.++(Enum.map(includes, &"-I#{&1}"))
+    |> Kernel.++(Enum.map(s.opts.includes, &"-I#{&1}"))
     |> Kernel.++(["--elixir_out=" <> elixir_out_opts])
     |> Kernel.++(sources)
   end
@@ -302,51 +302,21 @@ defmodule Mix.Tasks.Compile.Proto do
   end
 
   defp ensure_plugin(s) do
-    if protobuf_is_dep?() do
-      ensure_build_plugin(s)
-    else
-      case System.find_executable(@plugin) do
-        nil ->
-          install_plugin(s)
+    case System.find_executable(@plugin) do
+      nil ->
+        install_plugin(s)
 
-        path ->
-          req = version_req()
-          s = get_plugin_version(s, path)
+      path ->
+        req = version_req()
+        s = get_plugin_version(s, path)
 
-          if match_plugin_version?(s, req) do
-            s
-          else
-            Mix.shell().info("Found plugin `#{@plugin}=#{s.version}` (config: #{req})")
-            s
-          end
-      end
+        if match_plugin_version?(s, req) do
+          s
+        else
+          Mix.shell().info("Found plugin `#{@plugin}=#{s.version}` (config: #{req})")
+          s
+        end
     end
-  end
-
-  defp protobuf_is_dep?, do: Map.has_key?(Mix.Project.deps_paths(), :protobuf)
-
-  defp ensure_build_plugin(s) do
-    builddir = Path.join(Mix.Project.build_path(), "lib/protobuf")
-    buildpath = Path.join(builddir, @plugin)
-
-    if Mix.Utils.stale?([Mix.Project.config()[:lockfile]], [buildpath]) do
-      build_plugin(s, builddir)
-    else
-      %{s | env: system_path_prepend(s.env, builddir)}
-    end
-  end
-
-  defp build_plugin(s, destdir) do
-    srcdir = Mix.Project.deps_paths()[:protobuf]
-    Mix.Project.in_project(:protobuf, srcdir, fn _project ->
-      with_env(:prod, fn -> Mix.Task.run("escript.build") end)
-    end)
-
-    destpath = Path.join(destdir, @plugin)
-    move(Path.join(srcdir, @plugin), destpath)
-    Mix.shell().info("[protoc] #{destpath} (from dep)")
-
-    %{s | env: system_path_prepend(s.env, destdir)}
   end
 
   defp install_plugin(s) do
@@ -363,16 +333,6 @@ defmodule Mix.Tasks.Compile.Proto do
   defp system_path_prepend(env, dir) do
     path = List.keyfind(env, "PATH", 0, String.split(System.get_env("PATH", ""), ":"))
     List.keystore(env, "PATH", 0, {"PATH", Enum.join([dir | path], ":")})
-  end
-
-  defp with_env(env, fun) do
-    orig = Mix.env()
-    try do
-      Mix.env(env)
-      fun.()
-    after
-      Mix.env(orig)
-    end
   end
 
   defp get_plugin_version(s, path) do
@@ -448,5 +408,5 @@ defmodule Mix.Tasks.Compile.Proto do
     end
   end
 
-  defp version_req, do: Application.fetch_env!(:protobuf_compiler, :plugin_version)
+  defp version_req, do: "0.12.0"
 end
